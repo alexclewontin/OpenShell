@@ -384,6 +384,52 @@ async fn build_compute_runtime(
             .await
             .map_err(|e| Error::execution(format!("failed to create compute runtime: {e}")))
         }
+        ComputeDriverKind::Lxd => {
+            let socket_path = std::env::var("OPENSHELL_LXD_SOCKET")
+                .ok()
+                .filter(|s| !s.is_empty())
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(openshell_driver_lxd::LxdComputeConfig::default_socket_path);
+
+            let project = std::env::var("OPENSHELL_LXD_PROJECT")
+                .ok()
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| "openshell".to_string());
+
+            let network_name = std::env::var("OPENSHELL_NETWORK_NAME")
+                .ok()
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| openshell_core::config::DEFAULT_NETWORK_NAME.to_string());
+
+            let stop_timeout_secs: u32 = std::env::var("OPENSHELL_STOP_TIMEOUT")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(openshell_core::config::DEFAULT_STOP_TIMEOUT_SECS);
+
+            ComputeRuntime::new_lxd(
+                openshell_driver_lxd::LxdComputeConfig {
+                    socket_path,
+                    project,
+                    default_image: config.sandbox_image.clone(),
+                    grpc_endpoint: config.grpc_endpoint.clone(),
+                    gateway_port: config.bind_address.port(),
+                    sandbox_ssh_socket_path: config.sandbox_ssh_socket_path.clone(),
+                    network_name,
+                    ssh_listen_addr: format!("0.0.0.0:{}", config.sandbox_ssh_port),
+                    ssh_port: config.sandbox_ssh_port,
+                    ssh_handshake_secret: config.ssh_handshake_secret.clone(),
+                    ssh_handshake_skew_secs: config.ssh_handshake_skew_secs,
+                    stop_timeout_secs,
+                },
+                store,
+                sandbox_index,
+                sandbox_watch_bus,
+                tracing_log_bus,
+                supervisor_sessions,
+            )
+            .await
+            .map_err(|e| Error::execution(format!("failed to create compute runtime: {e}")))
+        }
     }
 }
 
@@ -395,7 +441,8 @@ fn configured_compute_driver(config: &Config) -> Result<ComputeDriverKind> {
         [
             driver @ (ComputeDriverKind::Kubernetes
             | ComputeDriverKind::Vm
-            | ComputeDriverKind::Podman),
+            | ComputeDriverKind::Podman
+            | ComputeDriverKind::Lxd),
         ] => Ok(*driver),
         drivers => Err(Error::config(format!(
             "multiple compute drivers are not supported yet; configured drivers: {}",
@@ -468,6 +515,15 @@ mod tests {
         assert_eq!(
             configured_compute_driver(&config).unwrap(),
             ComputeDriverKind::Vm
+        );
+    }
+
+    #[test]
+    fn configured_compute_driver_accepts_lxd() {
+        let config = Config::new(None).with_compute_drivers([ComputeDriverKind::Lxd]);
+        assert_eq!(
+            configured_compute_driver(&config).unwrap(),
+            ComputeDriverKind::Lxd
         );
     }
 }

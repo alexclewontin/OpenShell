@@ -1,0 +1,18 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# LXD driver development tasks
+
+["lxd:image"]
+description = "Build the OpenShell sandbox LXD image using distrobuilder"
+depends = ["build:sandbox"]
+run = "deploy/lxd/build-image.sh --import"
+
+["lxd:image:export"]
+description = "Build the LXD image tarball without importing (for transfer to another host)"
+depends = ["build:sandbox"]
+run = "deploy/lxd/build-image.sh"
+
+["build:sandbox"]
+description = "Build the openshell-sandbox binary (release)"
+run = "cargo build --release -p openshell-sandbox"

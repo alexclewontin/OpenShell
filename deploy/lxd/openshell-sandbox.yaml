@@ -1,0 +1,124 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# distrobuilder definition for the OpenShell sandbox LXD image.
+#
+# Build:
+#   mise run lxd:image
+#
+# Manual:
+#   cargo build --release -p openshell-sandbox
+#   sudo distrobuilder build-incus deploy/lxd/openshell-sandbox.yaml \
+#     -o image.architecture=$(uname -m) \
+#     -o source.url=http://archive.ubuntu.com/ubuntu \
+#     deploy/lxd/output/
+#   lxc image import deploy/lxd/output/incus.tar.xz \
+#     deploy/lxd/output/rootfs.squashfs --alias openshell-sandbox
+
+image:
+  distribution: ubuntu
+  release: noble
+  description: OpenShell sandbox container
+  architecture: x86_64
+
+source:
+  downloader: debootstrap
+  same_as: noble
+  url: http://archive.ubuntu.com/ubuntu
+  keyserver: keyserver.ubuntu.com
+  keys:
+    - "0xf6ecb3762474eda9d21b7022871920d1991bc93c"
+
+targets:
+  lxc:
+    create_message: |-
+      OpenShell sandbox container.
+
+      The openshell-sandbox supervisor runs as PID 1.
+
+files:
+  - path: /etc/hostname
+    generator: hostname
+
+  - path: /etc/hosts
+    generator: hosts
+
+  - path: /etc/machine-id
+    generator: dump
+
+  - path: /etc/netplan/10-lxc.yaml
+    generator: dump
+    content: |-
+      network:
+        version: 2
+        ethernets:
+          eth0:
+            dhcp4: true
+            dhcp-identifier: mac
+    types:
+      - container
+
+packages:
+  manager: apt
+  update: true
+  cleanup: true
+  sets:
+    - packages:
+        - ca-certificates
+        - iproute2
+        - iputils-ping
+        - curl
+      action: install
+
+  repositories:
+    - name: sources.list
+      url: |-
+        deb http://archive.ubuntu.com/ubuntu {{ image.release }} main restricted universe
+        deb http://archive.ubuntu.com/ubuntu {{ image.release }}-updates main restricted universe
+        deb http://security.ubuntu.com/ubuntu {{ image.release }}-security main restricted universe
+      architectures:
+        - amd64
+        - i386
+
+    - name: sources.list
+      url: |-
+        deb http://ports.ubuntu.com/ubuntu-ports {{ image.release }} main restricted universe
+        deb http://ports.ubuntu.com/ubuntu-ports {{ image.release }}-updates main restricted universe
+        deb http://ports.ubuntu.com/ubuntu-ports {{ image.release }}-security main restricted universe
+      architectures:
+        - armhf
+        - arm64
+
+actions:
+  - trigger: post-packages
+    action: |-
+      #!/bin/sh
+      set -eux
+
+      # Create the openshell user (matches Dockerfile.images supervisor stage).
+      useradd --create-home --user-group openshell
+
+      # Create the supervisor binary directory.
+      mkdir -p /opt/openshell/bin
+
+      # Create the sandbox workspace directory.
+      mkdir -p /sandbox
+
+      # Clean up apt caches.
+      apt-get clean
+      rm -rf /var/lib/apt/lists/*
+
+  - trigger: post-files
+    action: |-
+      #!/bin/sh
+      set -eux
+
+      # Copy the pre-built supervisor binary into the image.
+      # DISTROBUILDER_OVERLAYDIR is set by the build script to a directory
+      # containing the binary.
+      if [ -f /opt/openshell/bin/openshell-sandbox ]; then
+        chmod 755 /opt/openshell/bin/openshell-sandbox
+      fi
+
+mappings:
+  architecture_map: debian

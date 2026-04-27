@@ -49,6 +49,7 @@ pub enum ComputeDriverKind {
     Kubernetes,
     Vm,
     Podman,
+    Lxd,
 }
 
 impl ComputeDriverKind {
@@ -58,6 +59,7 @@ impl ComputeDriverKind {
             Self::Kubernetes => "kubernetes",
             Self::Vm => "vm",
             Self::Podman => "podman",
+            Self::Lxd => "lxd",
         }
     }
 }
@@ -76,8 +78,9 @@ impl FromStr for ComputeDriverKind {
             "kubernetes" => Ok(Self::Kubernetes),
             "vm" => Ok(Self::Vm),
             "podman" => Ok(Self::Podman),
+            "lxd" => Ok(Self::Lxd),
             other => Err(format!(
-                "unsupported compute driver '{other}'. expected one of: kubernetes, vm, podman"
+                "unsupported compute driver '{other}'. expected one of: kubernetes, vm, podman, lxd"
             )),
         }
     }
@@ -449,6 +452,10 @@ mod tests {
         assert_eq!(
             "podman".parse::<ComputeDriverKind>().unwrap(),
             ComputeDriverKind::Podman
+        );
+        assert_eq!(
+            "lxd".parse::<ComputeDriverKind>().unwrap(),
+            ComputeDriverKind::Lxd
         );
     }
 

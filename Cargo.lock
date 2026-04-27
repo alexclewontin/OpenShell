@@ -3160,6 +3160,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "openshell-driver-lxd"
+version = "0.0.0"
+dependencies = [
+ "clap",
+ "futures",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "miette",
+ "openshell-core",
+ "serde",
+ "serde_json",
+ "temp-env",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-stream",
+ "tonic",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "openshell-driver-podman"
 version = "0.0.0"
 dependencies = [
@@ -3335,6 +3357,7 @@ dependencies = [
  "miette",
  "openshell-core",
  "openshell-driver-kubernetes",
+ "openshell-driver-lxd",
  "openshell-driver-podman",
  "openshell-ocsf",
  "openshell-policy",
