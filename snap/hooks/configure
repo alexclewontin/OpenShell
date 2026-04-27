@@ -16,10 +16,13 @@ if [ -z "$DRIVER" ]; then
 	DRIVER="vm"
 fi
 
-if [ "$DRIVER" != "vm" ] && [ "$DRIVER" != "k8s" ]; then
-	echo "Error: Invalid driver '$DRIVER'. Allowed values: vm, k8s" >&2
+case "$DRIVER" in
+vm | k8s | lxd) ;;
+*)
+	echo "Error: Invalid driver '$DRIVER'. Allowed values: vm, k8s, lxd" >&2
 	exit 1
-fi
+	;;
+esac
 
 # Validate socket mode if set
 if [ -n "$SOCKET_MODE" ]; then
@@ -37,6 +40,16 @@ REGISTRY="${REGISTRY}"
 SOCKET_GROUP="${SOCKET_GROUP}"
 SOCKET_MODE="${SOCKET_MODE}"
 EOF
+
+# Append driver-specific config
+case "$DRIVER" in
+lxd)
+	LXD_SOCKET=$(snapctl get lxd.socket)
+	LXD_PROJECT=$(snapctl get lxd.project)
+	[ -n "$LXD_SOCKET" ] && echo "OPENSHELL_LXD_SOCKET=\"${LXD_SOCKET}\"" >> "$SNAP_DATA/config.env"
+	[ -n "$LXD_PROJECT" ] && echo "OPENSHELL_LXD_PROJECT=\"${LXD_PROJECT}\"" >> "$SNAP_DATA/config.env"
+	;;
+esac
 
 # Apply mode immediately to the current socket if it exists.
 SOCKET_PATH="$SNAP_COMMON/run/gateway.sock"

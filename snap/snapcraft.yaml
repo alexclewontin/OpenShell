@@ -1,7 +1,7 @@
 name: openshell
 title: OpenShell
 base: core24
-version: 'git'
+version: "git"
 summary: OpenShell CLI and Gateway
 description: |
   OpenShell is an agent manager that runs sandboxed agents in lightweight
@@ -38,6 +38,7 @@ apps:
       - network-bind
       - kube-config
       - kvm
+      - lxd
 
 plugs:
   kube-config:
@@ -49,14 +50,13 @@ layout:
   /etc/containers:
     bind: $SNAP/etc/containers
 
-
 parts:
   workspace:
     plugin: rust
     source: .
     build-environment:
       - OPENSHELL_VM_RUNTIME_COMPRESSED_DIR: $CRAFT_STAGE/vm-runtime
-    after: [vm-runtime, vm-rootfs]
+    after: [ vm-runtime, vm-rootfs ]
     build-packages:
       - build-essential
       - pkg-config
@@ -71,7 +71,13 @@ parts:
       - openssh-client
       - curl
     rust-features: []
-    rust-path: ["crates/openshell-cli", "crates/openshell-server", "crates/openshell-driver-vm"]
+    rust-path:
+      [
+        "crates/openshell-cli",
+        "crates/openshell-server",
+        "crates/openshell-driver-vm",
+        "crates/openshell-driver-lxd",
+      ]
     override-pull: |
       # Pull the source using snapcraft.
       craftctl default
@@ -111,7 +117,6 @@ parts:
       mkdir -p ${CRAFT_PART_INSTALL}/etc/containers
       touch ${CRAFT_PART_INSTALL}/etc/containers/registries.conf
 
-
   vm-runtime:
     plugin: nil
     build-packages:
@@ -127,13 +132,13 @@ parts:
         echo "Unsupported architecture"
         exit 1
       fi
-      
+
       URL="https://github.com/NVIDIA/OpenShell/releases/download/vm-dev/vm-runtime-${PLATFORM}.tar.zst"
       echo "Downloading $URL"
-      
+
       EXTRACT_DIR=$(mktemp -d)
       wget -qO- "$URL" | zstd -d --stdout | tar -xf - -C "$EXTRACT_DIR"
-      
+
       mkdir -p $CRAFT_PART_INSTALL/vm-runtime
       for file in "$EXTRACT_DIR"/*; do
         [ -f "$file" ] || continue
@@ -146,13 +151,13 @@ parts:
     plugin: dump
     source: target/vm-runtime-compressed
     organize:
-      'rootfs.tar.zst': vm-runtime/rootfs.tar.zst
+      "rootfs.tar.zst": vm-runtime/rootfs.tar.zst
 
   helm-charts:
     plugin: dump
     source: deploy/helm
     organize:
-      '*': helm-charts/
+      "*": helm-charts/
 
   helm-binary:
     plugin: nil
@@ -169,10 +174,10 @@ parts:
     plugin: dump
     source: snap/local-images
     organize:
-      '*': images/
+      "*": images/
 
   local-bin:
     plugin: dump
     source: snap/local-bin
     organize:
-      '*': bin/
+      "*": bin/
