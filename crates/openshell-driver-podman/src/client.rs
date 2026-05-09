@@ -263,14 +263,31 @@ impl PodmanClient {
         Self { socket_path }
     }
 
-    /// Open a new HTTP/1.1 connection to the Podman socket.
     async fn connect(
         &self,
     ) -> Result<hyper::client::conn::http1::SendRequest<Full<Bytes>>, PodmanApiError> {
-        let stream = UnixStream::connect(&self.socket_path).await.map_err(|e| {
-            PodmanApiError::Connection(format!("{}: {e}", self.socket_path.display()))
-        })?;
+        let path_str = self.socket_path.to_string_lossy();
+        if path_str.starts_with("tcp://") {
+            let addr = path_str.trim_start_matches("tcp://");
+            let stream = tokio::net::TcpStream::connect(addr).await.map_err(|e| {
+                PodmanApiError::Connection(format!("tcp connection failed to {addr}: {e}"))
+            })?;
+            Self::handshake(stream).await
+        } else {
+            let path_to_connect = path_str.trim_start_matches("unix://");
+            let stream = UnixStream::connect(path_to_connect)
+                .await
+                .map_err(|e| PodmanApiError::Connection(format!("{path_to_connect}: {e}")))?;
+            Self::handshake(stream).await
+        }
+    }
 
+    async fn handshake<S>(
+        stream: S,
+    ) -> Result<hyper::client::conn::http1::SendRequest<Full<Bytes>>, PodmanApiError>
+    where
+        S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+    {
         let (sender, conn) = hyper::client::conn::http1::handshake(TokioIo::new(stream))
             .await
             .map_err(|e| PodmanApiError::Connection(e.to_string()))?;

@@ -17,6 +17,7 @@ path = "src/main.rs"
 [dependencies]
 openshell-bootstrap = { path = "../openshell-bootstrap" }
 openshell-core = { path = "../openshell-core" }
+openshell-driver-podman = { path = "../openshell-driver-podman" }
 openshell-policy = { path = "../openshell-policy" }
 openshell-providers = { path = "../openshell-providers" }
 openshell-prover = { path = "../openshell-prover" }

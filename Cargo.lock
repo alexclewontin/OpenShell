@@ -3386,6 +3386,7 @@ dependencies = [
  "oauth2",
  "openshell-bootstrap",
  "openshell-core",
+ "openshell-driver-podman",
  "openshell-policy",
  "openshell-prover",
  "openshell-providers",
