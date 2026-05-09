@@ -2001,7 +2001,7 @@ async fn main() -> Result<()> {
                 run::gateway_logout(&name)?;
             }
             GatewayCommands::Select { name } => {
-                run::gateway_select(name.as_deref(), &cli.gateway)?;
+                run::gateway_select(name.as_deref(), &cli.gateway, &tls).await?;
             }
             GatewayCommands::Info { name } => {
                 let name = name
@@ -2010,7 +2010,7 @@ async fn main() -> Result<()> {
                 run::gateway_admin_info(&name)?;
             }
             GatewayCommands::List => {
-                run::gateway_list(&cli.gateway)?;
+                run::gateway_list(&cli.gateway, &tls).await?;
             }
         },
 

@@ -436,6 +436,48 @@ fn print_sandbox_header(sandbox: &Sandbox, display: Option<&ProvisioningDisplay>
     }
 }
 
+/// Apply Cloudflare edge authentication token when the gateway uses `cloudflare_jwt` auth mode.
+pub fn apply_edge_auth(tls: &mut TlsOptions, gateway_name: &str) {
+    if let Some(meta) = get_gateway_metadata(gateway_name)
+        && meta.auth_mode.as_deref() == Some("cloudflare_jwt")
+        && let Some(token) = openshell_bootstrap::edge_token::load_edge_token(gateway_name)
+    {
+        tls.edge_token = Some(token);
+    }
+}
+
+const STATUS_PROBE_TIMEOUT: Duration = Duration::from_millis(1500);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GatewayStatus {
+    Ok,
+    Stopped,
+    ErrorHttp,
+    Error,
+    Timeout,
+}
+
+impl GatewayStatus {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Ok => "OK",
+            Self::Stopped => "Stopped",
+            Self::ErrorHttp => "Error (HTTP)",
+            Self::Error => "Error",
+            Self::Timeout => "Timeout",
+        }
+    }
+
+    fn render(self) -> String {
+        let label = self.label();
+        match self {
+            Self::Ok => label.green().to_string(),
+            Self::Stopped => label.dimmed().to_string(),
+            Self::ErrorHttp | Self::Error | Self::Timeout => label.red().to_string(),
+        }
+    }
+}
+
 /// Show gateway status.
 #[allow(clippy::branches_sharing_code)]
 pub async fn gateway_status(gateway_name: &str, server: &str, tls: &TlsOptions) -> Result<()> {
@@ -523,54 +565,80 @@ fn gateway_env_override_warning(selected_name: &str) -> Option<String> {
     ))
 }
 
-pub fn gateway_select(name: Option<&str>, gateway_flag: &Option<String>) -> Result<()> {
+pub async fn gateway_select(
+    name: Option<&str>,
+    gateway_flag: &Option<String>,
+    tls: &TlsOptions,
+) -> Result<()> {
     let interactive = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
-    gateway_select_with(name, gateway_flag, interactive, |gateways, default| {
-        let prompt = format!(
-            "Select a gateway\n{}",
-            format_gateway_select_header(gateways)
-        );
-        let items = format_gateway_select_items(gateways);
-        Select::with_theme(&ColorfulTheme::default())
-            .with_prompt(prompt)
-            .items(&items)
-            .default(default)
-            .report(false)
-            .interact_opt()
-            .into_diagnostic()
-            .map(|selection| selection.map(|index| gateways[index].name.clone()))
-    })
+    let gateways = list_gateways()?;
+    // Skip the network probe when we won't reach the prompt anyway.
+    let statuses = if name.is_none() && interactive && !gateways.is_empty() {
+        fetch_gateway_statuses(&gateways, tls).await
+    } else {
+        Vec::new()
+    };
+    gateway_select_with(
+        name,
+        gateway_flag,
+        &gateways,
+        &statuses,
+        interactive,
+        |gateways, statuses, default| {
+            let prompt = format!(
+                "Select a gateway\n{}",
+                format_gateway_select_header(gateways)
+            );
+            let items = format_gateway_select_items(gateways, statuses);
+            Select::with_theme(&ColorfulTheme::default())
+                .with_prompt(prompt)
+                .items(&items)
+                .default(default)
+                .report(false)
+                .interact_opt()
+                .into_diagnostic()
+                .map(|selection| selection.map(|index| gateways[index].name.clone()))
+        },
+    )
 }
 
 fn format_gateway_select_header(gateways: &[GatewayMetadata]) -> String {
-    let (name_width, endpoint_width, type_width) = gateway_select_column_widths(gateways);
+    let (name_width, endpoint_width, type_width, auth_width) =
+        gateway_select_column_widths(gateways);
     format!(
-        "  {:<name_width$}  {:<endpoint_width$}  {:<type_width$}  {}",
+        "  {:<name_width$}  {:<endpoint_width$}  {:<type_width$}  {:<auth_width$}  {}",
         "NAME".bold(),
         "ENDPOINT".bold(),
         "TYPE".bold(),
         "AUTH".bold(),
+        "STATUS".bold(),
     )
 }
 
-fn format_gateway_select_items(gateways: &[GatewayMetadata]) -> Vec<String> {
-    let (name_width, endpoint_width, type_width) = gateway_select_column_widths(gateways);
+fn format_gateway_select_items(
+    gateways: &[GatewayMetadata],
+    statuses: &[GatewayStatus],
+) -> Vec<String> {
+    let (name_width, endpoint_width, type_width, auth_width) =
+        gateway_select_column_widths(gateways);
 
     gateways
         .iter()
-        .map(|gateway| {
+        .zip(statuses.iter())
+        .map(|(gateway, status)| {
             format!(
-                "{:<name_width$}  {:<endpoint_width$}  {:<type_width$}  {}",
+                "{:<name_width$}  {:<endpoint_width$}  {:<type_width$}  {:<auth_width$}  {}",
                 gateway.name,
                 gateway.gateway_endpoint,
                 gateway_type_label(gateway),
                 gateway_auth_label(gateway),
+                status.render(),
             )
         })
         .collect()
 }
 
-fn gateway_select_column_widths(gateways: &[GatewayMetadata]) -> (usize, usize, usize) {
+fn gateway_select_column_widths(gateways: &[GatewayMetadata]) -> (usize, usize, usize, usize) {
     let name_width = gateways
         .iter()
         .map(|gateway| gateway.name.len())
@@ -589,8 +657,14 @@ fn gateway_select_column_widths(gateways: &[GatewayMetadata]) -> (usize, usize, 
         .max()
         .unwrap_or(4)
         .max(4);
+    let auth_width = gateways
+        .iter()
+        .map(|gateway| gateway_auth_label(gateway).len())
+        .max()
+        .unwrap_or(4)
+        .max(4);
 
-    (name_width, endpoint_width, type_width)
+    (name_width, endpoint_width, type_width, auth_width)
 }
 
 fn gateway_type_label(gateway: &GatewayMetadata) -> &'static str {
@@ -737,27 +811,31 @@ fn plaintext_gateway_metadata(
 fn gateway_select_with<F>(
     name: Option<&str>,
     gateway_flag: &Option<String>,
+    gateways: &[GatewayMetadata],
+    statuses: &[GatewayStatus],
     interactive: bool,
     choose_gateway: F,
 ) -> Result<()>
 where
-    F: FnOnce(&[GatewayMetadata], usize) -> Result<Option<String>>,
+    F: FnOnce(&[GatewayMetadata], &[GatewayStatus], usize) -> Result<Option<String>>,
 {
     if let Some(name) = name {
         return gateway_use(name);
     }
 
-    let gateways = list_gateways()?;
-    if gateways.is_empty() || !interactive {
-        gateway_list(gateway_flag)?;
-        if !gateways.is_empty() {
-            eprintln!();
-            eprintln!(
-                "Select a gateway with: {}",
-                "openshell gateway select <name>".dimmed()
-            );
-        }
-        return Ok(());
+    if gateways.is_empty() {
+        return Err(miette::miette!(
+            "No gateways found.\n\
+             Add one with: openshell gateway add <endpoint>"
+        ));
+    }
+
+    if !interactive {
+        return Err(miette::miette!(
+            "Interactive selection requires a TTY.\n\
+             Use `openshell gateway select <name>` to select explicitly,\n\
+             or `openshell gateway list` to see available gateways."
+        ));
     }
 
     let active = gateway_flag.clone().or_else(load_active_gateway);
@@ -766,7 +844,7 @@ where
         .and_then(|name| gateways.iter().position(|gateway| gateway.name == name))
         .unwrap_or(0);
 
-    if let Some(name) = choose_gateway(&gateways, default)? {
+    if let Some(name) = choose_gateway(gateways, statuses, default)? {
         gateway_use(&name)?;
     } else {
         eprintln!("{} Gateway selection cancelled", "!".yellow());
@@ -1202,8 +1280,8 @@ pub fn gateway_logout(name: &str) -> Result<()> {
     Ok(())
 }
 
-/// List all registered gateways.
-pub fn gateway_list(gateway_flag: &Option<String>) -> Result<()> {
+/// List all registered gateways with live status check.
+pub async fn gateway_list(gateway_flag: &Option<String>, tls: &TlsOptions) -> Result<()> {
     let gateways = list_gateways()?;
     let active = gateway_flag.clone().or_else(load_active_gateway);
 
@@ -1211,50 +1289,35 @@ pub fn gateway_list(gateway_flag: &Option<String>) -> Result<()> {
         println!("No gateways found.");
         println!();
         println!(
-            "Register a gateway with: {}",
-            "openshell gateway add <endpoint>".dimmed()
+            "Deploy a gateway with: {}",
+            "openshell gateway start".dimmed()
         );
         return Ok(());
     }
 
-    // Calculate column widths
-    let name_width = gateways
-        .iter()
-        .map(|g| g.name.len())
-        .max()
-        .unwrap_or(4)
-        .max(4);
-    let endpoint_width = gateways
-        .iter()
-        .map(|g| g.gateway_endpoint.len())
-        .max()
-        .unwrap_or(8)
-        .max(8);
-    let type_width = gateways
-        .iter()
-        .map(|g| gateway_type_label(g).len())
-        .max()
-        .unwrap_or(4)
-        .max(4);
+    let statuses = fetch_gateway_statuses(&gateways, tls).await;
+    let (name_width, endpoint_width, type_width, auth_width) =
+        gateway_select_column_widths(&gateways);
 
-    // Print header
     println!(
-        "  {:<name_width$}  {:<endpoint_width$}  {:<type_width$}  {}",
+        "  {:<name_width$}  {:<endpoint_width$}  {:<type_width$}  {:<auth_width$}  {}",
         "NAME".bold(),
         "ENDPOINT".bold(),
         "TYPE".bold(),
         "AUTH".bold(),
+        "STATUS".bold(),
     );
 
-    // Print rows
-    for gateway in &gateways {
+    for (gateway, status) in gateways.iter().zip(statuses.iter()) {
         let is_active = active.as_deref() == Some(&gateway.name);
         let marker = if is_active { "*" } else { " " };
-        let gw_type = gateway_type_label(gateway);
-        let gw_auth = gateway_auth_label(gateway);
         let line = format!(
-            "{marker} {:<name_width$}  {:<endpoint_width$}  {:<type_width$}  {gw_auth}",
-            gateway.name, gateway.gateway_endpoint, gw_type,
+            "{marker} {:<name_width$}  {:<endpoint_width$}  {:<type_width$}  {:<auth_width$}  {}",
+            gateway.name,
+            gateway.gateway_endpoint,
+            gateway_type_label(gateway),
+            gateway_auth_label(gateway),
+            status.render(),
         );
         if is_active {
             println!("{}", line.green());
@@ -1263,10 +1326,71 @@ pub fn gateway_list(gateway_flag: &Option<String>) -> Result<()> {
         }
     }
 
+    eprintln!();
+    eprintln!(
+        "Select a gateway with: {}",
+        "openshell gateway select <name>".dimmed()
+    );
     Ok(())
 }
 
+async fn fetch_gateway_statuses(
+    gateways: &[GatewayMetadata],
+    tls: &TlsOptions,
+) -> Vec<GatewayStatus> {
+    let futures = gateways.iter().map(|g| {
+        let tls = tls.clone();
+        async move {
+            // Distinguish a missing socket from an unreachable one so the
+            // user sees "Stopped" rather than a generic transport error.
+            if let Some(path) = g.gateway_endpoint.strip_prefix("unix://")
+                && !Path::new(path).exists()
+            {
+                return GatewayStatus::Stopped;
+            }
+            let mut gw_tls = tls.with_gateway_name(&g.name);
+            apply_edge_auth(&mut gw_tls, &g.name);
+            match tokio::time::timeout(
+                STATUS_PROBE_TIMEOUT,
+                http_health_check(&g.gateway_endpoint, &gw_tls),
+            )
+            .await
+            {
+                Ok(Ok(Some(status))) if status.is_success() => GatewayStatus::Ok,
+                Ok(Ok(Some(_))) => GatewayStatus::ErrorHttp,
+                Ok(Ok(None) | Err(_)) => GatewayStatus::Error,
+                Err(_) => GatewayStatus::Timeout,
+            }
+        }
+    });
+    futures::future::join_all(futures).await
+}
+
 async fn http_health_check(server: &str, tls: &TlsOptions) -> Result<Option<StatusCode>> {
+    #[cfg(unix)]
+    if let Some(path) = server.strip_prefix("unix://") {
+        let path = path.to_string();
+        let Ok(stream) = tokio::net::UnixStream::connect(&path).await else {
+            return Ok(None);
+        };
+        let io = hyper_util::rt::TokioIo::new(stream);
+        let Ok((mut sender, conn)) = hyper::client::conn::http1::handshake(io).await else {
+            return Ok(None);
+        };
+        tokio::spawn(async move {
+            let _ = conn.await;
+        });
+        let req = Request::builder()
+            .method("GET")
+            .uri("http://localhost/healthz")
+            .body(Full::new(Bytes::new()))
+            .into_diagnostic()?;
+        return sender
+            .send_request(req)
+            .await
+            .map_or_else(|_| Ok(None), |resp| Ok(Some(resp.status())));
+    }
+
     let base = server.trim_end_matches('/');
     let uri: hyper::Uri = format!("{base}/healthz").parse().into_diagnostic()?;
 
@@ -6110,12 +6234,12 @@ fn format_timestamp_ms(ms: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        TlsOptions, build_sandbox_resource_limits, dockerfile_sources_supported_for_gateway,
-        format_endpoint, format_gateway_select_header, format_gateway_select_items,
-        format_provider_attachment_table, gateway_add, gateway_auth_label,
-        gateway_env_override_warning, gateway_select_with, gateway_type_label, git_sync_files,
-        http_health_check, image_requests_gpu, import_local_package_mtls_bundle,
-        inferred_provider_type, package_managed_tls_dirs, parse_cli_setting_value,
+        GatewayStatus, TlsOptions, build_sandbox_resource_limits,
+        dockerfile_sources_supported_for_gateway, format_endpoint, format_gateway_select_header,
+        format_gateway_select_items, format_provider_attachment_table, gateway_add,
+        gateway_auth_label, gateway_env_override_warning, gateway_select_with, gateway_type_label,
+        git_sync_files, http_health_check, image_requests_gpu, import_local_package_mtls_bundle,
+        inferred_provider_type, list_gateways, package_managed_tls_dirs, parse_cli_setting_value,
         parse_credential_pairs, plaintext_gateway_is_remote, provisioning_timeout_message,
         ready_false_condition_message, resolve_from, sandbox_should_persist,
         service_expose_status_error, service_url_for_gateway,
@@ -6718,8 +6842,9 @@ mod tests {
             )
             .expect("store gateway");
 
+            let gateways = list_gateways().expect("list gateways");
             let mut prompted = false;
-            gateway_select_with(Some("alpha"), &None, true, |_, _| {
+            gateway_select_with(Some("alpha"), &None, &gateways, &[], true, |_, _, _| {
                 prompted = true;
                 Ok(None)
             })
@@ -6775,8 +6900,9 @@ mod tests {
             .expect("store beta");
             super::save_active_gateway("beta").expect("save active gateway");
 
+            let gateways = list_gateways().expect("list gateways");
             let mut seen_default = None;
-            gateway_select_with(None, &None, true, |gateways, default| {
+            gateway_select_with(None, &None, &gateways, &[], true, |gateways, _, default| {
                 seen_default = Some(default);
                 Ok(Some(gateways[default].name.clone()))
             })
@@ -6788,7 +6914,7 @@ mod tests {
     }
 
     #[test]
-    fn gateway_select_non_interactive_lists_gateways_without_prompting() {
+    fn gateway_select_non_interactive_errors_without_prompting() {
         let tmpdir = tempfile::tempdir().expect("create tmpdir");
         with_tmp_xdg(tmpdir.path(), || {
             store_gateway_metadata(
@@ -6797,13 +6923,14 @@ mod tests {
             )
             .expect("store gateway");
 
+            let gateways = list_gateways().expect("list gateways");
             let mut prompted = false;
-            gateway_select_with(None, &None, false, |_, _| {
+            let result = gateway_select_with(None, &None, &gateways, &[], false, |_, _, _| {
                 prompted = true;
                 Ok(None)
-            })
-            .expect("non-interactive selection");
+            });
 
+            assert!(result.is_err(), "non-interactive selection should error");
             assert!(!prompted, "non-interactive mode should not prompt");
             assert_eq!(load_active_gateway(), None);
         });
@@ -6821,7 +6948,8 @@ mod tests {
             },
         ];
 
-        let items = format_gateway_select_items(&gateways);
+        let statuses = vec![GatewayStatus::Ok, GatewayStatus::Stopped];
+        let items = format_gateway_select_items(&gateways, &statuses);
         let header = format_gateway_select_header(&gateways);
 
         assert_eq!(gateway_type_label(&gateways[0]), "cloud");
