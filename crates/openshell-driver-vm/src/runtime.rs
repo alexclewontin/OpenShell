@@ -62,6 +62,7 @@ pub struct VmLaunchConfig {
     pub vsock_cid: Option<u32>,
     pub guest_mac: Option<String>,
     pub gateway_port: Option<u16>,
+    pub run_as_uid: Option<u32>,
 }
 
 pub fn run_vm(config: &VmLaunchConfig) -> Result<(), String> {
@@ -863,6 +864,22 @@ fn run_libkrun_vm(config: &VmLaunchConfig) -> Result<(), String> {
                 eprintln!("libkrun worker: procguard arm failed: {err}");
                 std::process::exit(1);
             }
+            if let Some(uid) = config.run_as_uid {
+                unsafe {
+                    if libc::setresgid(uid, uid, uid) != 0 {
+                        eprintln!(
+                            "libkrun worker: warning: setresgid failed ({}); VM worker will continue with current privileges.",
+                            std::io::Error::last_os_error()
+                        );
+                    }
+                    if libc::setresuid(uid, uid, uid) != 0 {
+                        eprintln!(
+                            "libkrun worker: warning: setresuid failed ({}); VM worker will continue with current privileges.",
+                            std::io::Error::last_os_error()
+                        );
+                    }
+                }
+            }
             let ret = vm.start_enter();
             eprintln!("krun_start_enter failed: {ret}");
             std::process::exit(1);
@@ -1185,17 +1202,22 @@ fn hash_path_id(path: &Path) -> String {
 }
 
 fn secure_socket_base(subdir: &str) -> Result<PathBuf, String> {
-    let base = std::env::var_os("XDG_RUNTIME_DIR").map_or_else(
-        || {
-            let fallback = PathBuf::from("/tmp");
-            if fallback.is_dir() {
-                fallback
-            } else {
-                std::env::temp_dir()
-            }
-        },
-        PathBuf::from,
-    );
+    // Sockets created here must be reachable from both the daemon and any
+    // user-side helpers, so prefer an explicit `OPENSHELL_RUNTIME_DIR`
+    // (set by installers — snap, deb, systemd unit, dev wrappers — to a
+    // shared writable location). Fall back to XDG_RUNTIME_DIR for plain
+    // user-mode and finally /tmp.
+    let base = if let Some(runtime_dir) = std::env::var_os("OPENSHELL_RUNTIME_DIR") {
+        PathBuf::from(runtime_dir)
+    } else if let Some(xdg) = std::env::var_os("XDG_RUNTIME_DIR") {
+        PathBuf::from(xdg)
+    } else {
+        let mut base = PathBuf::from("/tmp");
+        if !base.is_dir() {
+            base = std::env::temp_dir();
+        }
+        base
+    };
     let dir = base.join(subdir);
 
     if dir.exists() {
@@ -1349,6 +1371,7 @@ mod tests {
             vsock_cid: Some(4),
             guest_mac: Some("02:00:00:00:00:01".to_string()),
             gateway_port: Some(8080),
+            run_as_uid: None,
         }
     }
 

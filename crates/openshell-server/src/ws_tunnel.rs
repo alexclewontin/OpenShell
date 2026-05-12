@@ -63,7 +63,7 @@ async fn handle_ws_tunnel(
     let (tunnel_read, tunnel_write) = tokio::io::split(tunnel_stream);
 
     let service_task = tokio::spawn(async move {
-        if let Err(e) = service.serve(service_stream).await {
+        if let Err(e) = service.serve(service_stream, None).await {
             debug!(error = %e, "WS tunnel: multiplex service error");
         }
     });

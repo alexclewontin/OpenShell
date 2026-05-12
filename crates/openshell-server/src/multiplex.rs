@@ -113,6 +113,10 @@ macro_rules! request_id_middleware {
 /// the largest payload and well within this cap under normal use.
 const MAX_GRPC_DECODE_SIZE: usize = 1_048_576;
 
+/// Extractor struct for the peer's UID (extracted from `SO_PEERCRED` on Unix sockets).
+#[derive(Clone, Copy, Debug)]
+pub struct PeerUid(pub u32);
+
 /// Multiplexed gRPC/HTTP service.
 #[derive(Clone)]
 pub struct MultiplexService {
@@ -128,7 +132,11 @@ impl MultiplexService {
     }
 
     /// Serve a connection, routing to gRPC or HTTP based on content-type.
-    pub async fn serve<S>(&self, stream: S) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
+    pub async fn serve<S>(
+        &self,
+        stream: S,
+        peer_uid: Option<u32>,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
     where
         S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
     {
@@ -151,6 +159,22 @@ impl MultiplexService {
 
         let grpc_service = request_id_middleware!(grpc_service);
         let http_service = request_id_middleware!(http_service);
+        let grpc_service = ::tower::ServiceBuilder::new()
+            .map_request(move |mut req: Request<_>| {
+                if let Some(uid) = peer_uid {
+                    req.extensions_mut().insert(PeerUid(uid));
+                }
+                req
+            })
+            .service(grpc_service);
+        let http_service = ::tower::ServiceBuilder::new()
+            .map_request(move |mut req: Request<_>| {
+                if let Some(uid) = peer_uid {
+                    req.extensions_mut().insert(PeerUid(uid));
+                }
+                req
+            })
+            .service(http_service);
 
         let service = MultiplexedService::new(grpc_service, http_service);
 

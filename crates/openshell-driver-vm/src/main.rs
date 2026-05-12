@@ -48,6 +48,9 @@ struct Args {
     #[arg(long, hide = true, default_value_t = 2048)]
     vm_mem_mib: u32,
 
+    #[arg(long, hide = true)]
+    vm_run_as_uid: Option<u32>,
+
     #[arg(long, hide = true, default_value_t = 1)]
     vm_krun_log_level: u32,
 
@@ -485,6 +488,7 @@ fn build_vm_launch_config(args: &Args) -> std::result::Result<VmLaunchConfig, St
         vsock_cid: args.vm_vsock_cid,
         guest_mac: args.vm_guest_mac.clone(),
         gateway_port: args.vm_gateway_port,
+        run_as_uid: args.vm_run_as_uid,
     })
 }
 

@@ -56,6 +56,10 @@ pub(super) async fn handle_create_sandbox(
 ) -> Result<Response<SandboxResponse>, Status> {
     use crate::persistence::current_time_ms;
 
+    let peer_uid = request
+        .extensions()
+        .get::<crate::multiplex::PeerUid>()
+        .map(|p| p.0);
     let request = request.into_inner();
     let spec = request
         .spec
@@ -129,7 +133,7 @@ pub(super) async fn handle_create_sandbox(
             status
         })?;
 
-    let sandbox = state.compute.create_sandbox(sandbox).await?;
+    let sandbox = state.compute.create_sandbox(sandbox, peer_uid).await?;
 
     info!(
         sandbox_id = %id,

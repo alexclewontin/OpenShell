@@ -298,6 +298,41 @@ pub async fn run_server(
     };
 
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
+
+    // Accept UDS connections
+    if let Some(uds_path) = &config.unix_socket_path {
+        let _ = std::fs::remove_file(uds_path);
+        let uds_listener = tokio::net::UnixListener::bind(uds_path)
+            .map_err(|e| Error::transport(format!("failed to bind UDS {uds_path}: {e}")))?;
+
+        if let Some(group) = &config.unix_socket_group
+            && let Ok(Some(grp)) = nix::unistd::Group::from_name(group)
+        {
+            let _ =
+                nix::unistd::chown(std::path::Path::new(uds_path.as_str()), None, Some(grp.gid));
+        }
+        if let Some(mode_str) = &config.unix_socket_mode
+            && let Ok(mode) = u32::from_str_radix(mode_str, 8)
+        {
+            if let Err(e) = std::fs::set_permissions(
+                uds_path,
+                std::os::unix::fs::PermissionsExt::from_mode(mode),
+            ) {
+                tracing::error!(error = %e, "Failed to set socket permissions");
+            } else {
+                tracing::info!(mode = mode, "Socket permissions set successfully");
+            }
+        }
+
+        info!(path = %uds_path, "UDS Server listening");
+        let service = service.clone();
+        let mut shutdown_rx = shutdown_tx.subscribe();
+        let uds_path_clone = uds_path.clone();
+        tokio::spawn(async move {
+            run_uds_accept_loop(uds_path_clone, uds_listener, service, &mut shutdown_rx).await;
+        });
+    }
+
     let mut listener_tasks = Vec::with_capacity(gateway_listeners.len());
     let enable_loopback_service_http = config.service_routing.enable_loopback_service_http;
     for (listener, listen_addr) in gateway_listeners {
@@ -484,7 +519,7 @@ fn spawn_gateway_connection(
                 Ok(ConnectionProtocol::Tls | ConnectionProtocol::Unknown) => {
                     match acceptor.inner().accept(stream).await {
                         Ok(tls_stream) => {
-                            if let Err(e) = service.serve(tls_stream).await {
+                            if let Err(e) = service.serve(tls_stream, None).await {
                                 error!(error = %e, client = %addr, "Connection error");
                             }
                         }
@@ -504,8 +539,41 @@ fn spawn_gateway_connection(
         });
     } else {
         tokio::spawn(async move {
-            if let Err(e) = service.serve(stream).await {
+            if let Err(e) = service.serve(stream, None).await {
                 error!(error = %e, client = %addr, "Connection error");
+            }
+        });
+    }
+}
+
+async fn run_uds_accept_loop(
+    uds_path: String,
+    listener: tokio::net::UnixListener,
+    service: MultiplexService,
+    shutdown_rx: &mut watch::Receiver<bool>,
+) {
+    loop {
+        let (stream, _addr) = tokio::select! {
+            _ = shutdown_rx.changed() => {
+                debug!(path = %uds_path, "UDS Listener received shutdown");
+                return;
+            }
+            accepted = listener.accept() => {
+                match accepted {
+                    Ok(conn) => conn,
+                    Err(e) => {
+                        error!(error = %e, path = %uds_path, "Failed to accept UDS connection");
+                        continue;
+                    }
+                }
+            }
+        };
+
+        let peer_uid = stream.peer_cred().ok().map(|c| c.uid());
+        let service = service.clone();
+        tokio::spawn(async move {
+            if let Err(e) = service.serve(stream, peer_uid).await {
+                error!(error = %e, "UDS Connection error");
             }
         });
     }

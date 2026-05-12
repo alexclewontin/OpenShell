@@ -421,7 +421,11 @@ impl ComputeRuntime {
             .map(|_| ())
     }
 
-    pub async fn create_sandbox(&self, sandbox: Sandbox) -> Result<Sandbox, Status> {
+    pub async fn create_sandbox(
+        &self,
+        sandbox: Sandbox,
+        run_as_uid: Option<u32>,
+    ) -> Result<Sandbox, Status> {
         let existing = self
             .store
             .get_message_by_name::<Sandbox>(sandbox.object_name())
@@ -440,7 +444,11 @@ impl ComputeRuntime {
             .await
             .map_err(|e| Status::internal(format!("persist sandbox failed: {e}")))?;
 
-        let driver_sandbox = driver_sandbox_from_public(&sandbox);
+        let mut driver_sandbox = driver_sandbox_from_public(&sandbox);
+        if let Some(spec) = driver_sandbox.spec.as_mut() {
+            spec.run_as_uid = run_as_uid;
+        }
+
         match self
             .driver
             .create_sandbox(Request::new(CreateSandboxRequest {
@@ -1132,6 +1140,7 @@ fn driver_sandbox_spec_from_public(spec: &SandboxSpec) -> DriverSandboxSpec {
             .map(driver_sandbox_template_from_public),
         gpu: spec.gpu,
         gpu_device: spec.gpu_device.clone(),
+        run_as_uid: None,
     }
 }
 

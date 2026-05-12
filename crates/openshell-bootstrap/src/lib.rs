@@ -23,6 +23,9 @@ use std::sync::Mutex;
 #[cfg(test)]
 pub(crate) static XDG_TEST_LOCK: Mutex<()> = Mutex::new(());
 
+/// Default host port for the `OpenShell` gateway.
+pub const DEFAULT_GATEWAY_PORT: u16 = 8080;
+
 pub use crate::metadata::{
     GatewayMetadata, clear_active_gateway, clear_last_sandbox_if_matches,
     extract_host_from_ssh_destination, get_gateway_metadata, list_gateways, load_active_gateway,

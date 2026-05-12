@@ -62,6 +62,18 @@ struct RunArgs {
     #[arg(long, default_value_t = 0, env = "OPENSHELL_METRICS_PORT")]
     metrics_port: u16,
 
+    /// Path to bind the UNIX Domain Socket listener to.
+    #[arg(long, env = "OPENSHELL_UNIX_SOCKET_PATH")]
+    unix_socket_path: Option<String>,
+
+    /// Group ownership for the UNIX Domain Socket.
+    #[arg(long, env = "OPENSHELL_UNIX_SOCKET_GROUP")]
+    unix_socket_group: Option<String>,
+
+    /// Permissions for the UNIX Domain Socket (e.g., 0660).
+    #[arg(long, env = "OPENSHELL_UNIX_SOCKET_MODE")]
+    unix_socket_mode: Option<String>,
+
     /// Log level (trace, debug, info, warn, error).
     #[arg(long, default_value = "info", env = "OPENSHELL_LOG_LEVEL")]
     log_level: String,
@@ -403,6 +415,15 @@ async fn run_from_args(args: RunArgs) -> Result<()> {
         }
         let metrics_bind = SocketAddr::new(args.bind_address, args.metrics_port);
         config = config.with_metrics_bind_address(metrics_bind);
+    }
+    if let Some(path) = args.unix_socket_path {
+        config = config.with_unix_socket_path(path);
+    }
+    if let Some(group) = args.unix_socket_group {
+        config = config.with_unix_socket_group(group);
+    }
+    if let Some(mode) = args.unix_socket_mode {
+        config = config.with_unix_socket_mode(mode);
     }
 
     config = config

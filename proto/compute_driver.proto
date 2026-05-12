@@ -90,6 +90,8 @@ message DriverSandboxSpec {
   // (e.g. "0", "1"). When empty with gpu=true, the driver assigns the
   // first available GPU.
   string gpu_device = 10;
+  // User ID to run the sandbox as, extracted from UDS auth.
+  optional uint32 run_as_uid = 11;
 }
 
 // Driver-owned runtime template consumed by the compute platform.

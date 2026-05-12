@@ -17,6 +17,7 @@ use futures::{Stream, StreamExt};
 use nix::errno::Errno;
 use nix::sys::signal::{Signal, kill};
 use nix::unistd::Pid;
+use nix::unistd::{Gid, Uid};
 use oci_client::client::{Client as OciClient, ClientConfig};
 use oci_client::manifest::{ImageIndexEntry, OciDescriptor};
 use oci_client::secrets::RegistryAuth;
@@ -194,6 +195,28 @@ impl VmDriverConfig {
 
         Ok(Some(VmDriverTlsPaths { ca, cert, key }))
     }
+}
+
+fn chown_recursive(dir: &Path, uid: u32, gid: u32) -> std::io::Result<()> {
+    let nix_uid = Uid::from_raw(uid);
+    let nix_gid = Gid::from_raw(gid);
+
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(path) = stack.pop() {
+        let _ = nix::unistd::chown(&path, Some(nix_uid), Some(nix_gid));
+        if let Ok(entries) = fs::read_dir(&path) {
+            for entry in entries.flatten() {
+                let entry_path = entry.path();
+                let _ = nix::unistd::chown(&entry_path, Some(nix_uid), Some(nix_gid));
+                if let Ok(file_type) = entry.file_type() {
+                    if file_type.is_dir() {
+                        stack.push(entry_path);
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 fn validate_openshell_endpoint(endpoint: &str) -> Result<(), String> {
@@ -543,6 +566,10 @@ impl VmDriver {
         command
             .arg("--vm-krun-log-level")
             .arg(self.config.krun_log_level.to_string());
+        if let Some(uid) = sandbox.spec.as_ref().and_then(|spec| spec.run_as_uid) {
+            command.arg("--vm-run-as-uid").arg(uid.to_string());
+            let _ = chown_recursive(&state_dir, uid, uid);
+        }
 
         for env in build_guest_environment(sandbox, &self.config, endpoint_override.as_deref()) {
             command.arg("--vm-env").arg(env);
