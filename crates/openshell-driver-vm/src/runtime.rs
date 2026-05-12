@@ -108,7 +108,7 @@ fn run_qemu_vm(config: &VmLaunchConfig) -> Result<(), String> {
     }
 
     #[cfg(target_os = "linux")]
-    check_kvm_access()?;
+    crate::kvm::check_kvm_access()?;
 
     let guest_env = qemu_guest_env_vars(config, host_dns_server());
     write_guest_env_file(&config.rootfs, &guest_env)?;
@@ -693,7 +693,7 @@ fn run_libkrun_vm(config: &VmLaunchConfig) -> Result<(), String> {
     }
 
     #[cfg(target_os = "linux")]
-    check_kvm_access()?;
+    crate::kvm::check_kvm_access()?;
 
     let runtime_dir = configured_runtime_dir()?;
     validate_runtime_dir(&runtime_dir)?;
@@ -1325,16 +1325,6 @@ fn path_to_cstring(path: &Path) -> Result<CString, String> {
     CString::new(path).map_err(|e| format!("invalid path string {path}: {e}"))
 }
 
-#[cfg(target_os = "linux")]
-fn check_kvm_access() -> Result<(), String> {
-    std::fs::OpenOptions::new()
-        .read(true)
-        .open("/dev/kvm")
-        .map(|_| ())
-        .map_err(|e| {
-            format!("cannot open /dev/kvm: {e}\nKVM access is required to run microVMs on Linux.")
-        })
-}
 
 #[cfg(test)]
 mod tests {

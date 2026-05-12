@@ -5,6 +5,7 @@ pub mod driver;
 mod embedded_runtime;
 mod ffi;
 pub mod gpu;
+mod kvm;
 pub mod procguard;
 mod rootfs;
 mod runtime;

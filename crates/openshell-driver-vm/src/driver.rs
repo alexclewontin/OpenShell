@@ -1454,6 +1454,10 @@ fn check_gpu_privileges() -> Result<(), String> {
 // gRPC API surface, so boxing here would diverge from every other handler.
 #[allow(clippy::result_large_err)]
 fn validate_vm_sandbox(sandbox: &Sandbox, gpu_enabled: bool) -> Result<(), Status> {
+    #[cfg(target_os = "linux")]
+    if let Err(diagnostic) = crate::kvm::check_kvm_access() {
+        return Err(Status::failed_precondition(diagnostic));
+    }
     validate_sandbox_id(&sandbox.id)?;
 
     let spec = sandbox
