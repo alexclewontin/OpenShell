@@ -32,7 +32,15 @@ __pycache__/
 
 # Distribution / packaging
 .Python
+openshell_*.snap
+openshell-core_*.rock
 develop-eggs/
+snap/local-images/
+snap/local-vm-runtime-extracted/
+squashfs-root/
+.craft/
+prime/
+stage/
 dist/
 downloads/
 eggs/

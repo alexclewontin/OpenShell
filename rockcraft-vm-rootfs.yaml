@@ -1,0 +1,80 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+name: openshell-vm-rootfs
+base: ubuntu@24.04
+adopt-info: workspace
+version: git
+summary: OpenShell VM Rootfs
+description: MicroVM root filesystem for OpenShell sandboxes
+
+platforms:
+  amd64:
+  arm64:
+
+parts:
+  workspace:
+    plugin: rust
+    source: .
+    build-packages:
+      - build-essential
+      - pkg-config
+      - libssl-dev
+      - clang
+      - libclang-dev
+      - libz3-dev
+    stage-packages:
+      - ca-certificates
+      - curl
+      - e2fsprogs
+      - iptables
+      - iproute2
+      - python3-minimal
+      - busybox-static
+      - sqlite3
+      - util-linux
+      - zstd
+    rust-features: []
+    rust-path: 
+      - "crates/openshell-sandbox"
+    organize:
+      bin/openshell-sandbox: opt/openshell/bin/openshell-sandbox
+    override-pull: |
+      craftctl default
+      # Set version to git describe or short commit hash
+      craftctl set version=$(git branch --show-current | tr '/' '-')-g$(git rev-parse --short HEAD)
+
+  scripts:
+    plugin: nil
+    source: crates/openshell-driver-vm/scripts
+    organize:
+      openshell-vm-sandbox-init.sh: srv/openshell-vm-sandbox-init.sh
+    override-build: |
+      mkdir -p $CRAFT_PART_INSTALL/usr/share/udhcpc $CRAFT_PART_INSTALL/sbin
+      ln -sf /bin/busybox $CRAFT_PART_INSTALL/sbin/udhcpc
+      install -m 755 openshell-vm-sandbox-init.sh $CRAFT_PART_INSTALL/openshell-vm-sandbox-init.sh
+
+  claude:
+    plugin: nil
+    source:
+      - to amd64: https://downloads.claude.ai/claude-code-releases/2.1.119/linux-x64/claude
+      - to arm64: https://downloads.claude.ai/claude-code-releases/2.1.119/linux-arm64/claude
+    source-type: file
+    source-checksum:
+      - to amd64: sha256/cca43053f062949495596b11b6fd1b59cf79102adb13bacbe66997e6fae41e4a
+      - to arm64: sha256/382aa73ea4b07fd8d698e3159b5ef9e1b8739fae7505ba8ddd28b8a6a62819ce
+    override-build: |
+      # could just use dump plugin, but install also sets the executable bit
+      install -D -m 0755 "$CRAFT_PART_SRC/claude" "$CRAFT_PART_INSTALL/usr/local/bin/claude"
+
+  copilot:
+    plugin: nil
+    source:
+      - to amd64: https://github.com/github/copilot-cli/releases/download/v1.0.36/copilot-linux-x64.tar.gz
+      - to arm64: https://github.com/github/copilot-cli/releases/download/v1.0.36/copilot-linux-arm64.tar.gz
+    source-checksum:
+      - to amd64: sha256/9b8a00aa6140e0b6eb0245262f7d3f8bdb170a2e782609acdf3d206bbc27b431
+      - to arm64: sha256/fc560b3b19db561bc4379a7e7be853f8a4ad1b8fc0c109559553914a737dc513
+    override-build: |
+      # could just use dump plugin, but install also sets the executable bit
+      install -D -m 0755 "$CRAFT_PART_SRC/copilot" "$CRAFT_PART_INSTALL/usr/local/bin/copilot"
