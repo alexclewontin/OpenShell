@@ -19,7 +19,9 @@ openshell-bootstrap = { path = "../openshell-bootstrap" }
 openshell-core = { path = "../openshell-core" }
 openshell-driver-docker = { path = "../openshell-driver-docker" }
 openshell-driver-kubernetes = { path = "../openshell-driver-kubernetes" }
+openshell-driver-local = { path = "../openshell-driver-local" }
 openshell-driver-podman = { path = "../openshell-driver-podman" }
+openshell-driver-ssh = { path = "../openshell-driver-ssh" }
 openshell-ocsf = { path = "../openshell-ocsf" }
 openshell-policy = { path = "../openshell-policy" }
 openshell-providers = { path = "../openshell-providers" }

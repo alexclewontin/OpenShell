@@ -59,6 +59,8 @@ pub enum ComputeDriverKind {
     Vm,
     Docker,
     Podman,
+    Ssh,
+    Local,
 }
 
 impl ComputeDriverKind {
@@ -69,6 +71,8 @@ impl ComputeDriverKind {
             Self::Vm => "vm",
             Self::Docker => "docker",
             Self::Podman => "podman",
+            Self::Ssh => "ssh",
+            Self::Local => "local",
         }
     }
 }
@@ -88,8 +92,10 @@ impl FromStr for ComputeDriverKind {
             "vm" => Ok(Self::Vm),
             "docker" => Ok(Self::Docker),
             "podman" => Ok(Self::Podman),
+            "ssh" => Ok(Self::Ssh),
+            "local" => Ok(Self::Local),
             other => Err(format!(
-                "unsupported compute driver '{other}'. expected one of: kubernetes, vm, docker, podman"
+                "unsupported compute driver '{other}'. expected one of: kubernetes, vm, docker, podman, ssh, local"
             )),
         }
     }
@@ -98,7 +104,7 @@ impl FromStr for ComputeDriverKind {
 /// Auto-detect the appropriate compute driver based on the runtime environment.
 ///
 /// Priority order: Kubernetes → Podman → Docker.
-/// VM is never auto-detected (requires explicit `--drivers vm`).
+/// VM, SSH, and Local are never auto-detected (require explicit `--drivers`).
 ///
 /// Returns the first driver where the environment check passes.
 /// Returns `None` if no compatible driver is found.
@@ -743,6 +749,22 @@ mod tests {
         assert_eq!(
             "docker".parse::<ComputeDriverKind>().unwrap(),
             ComputeDriverKind::Docker
+        );
+        assert_eq!(
+            "ssh".parse::<ComputeDriverKind>().unwrap(),
+            ComputeDriverKind::Ssh
+        );
+        assert_eq!(
+            "local".parse::<ComputeDriverKind>().unwrap(),
+            ComputeDriverKind::Local
+        );
+        assert_eq!(
+            "ssh".parse::<ComputeDriverKind>().unwrap(),
+            ComputeDriverKind::Ssh
+        );
+        assert_eq!(
+            "local".parse::<ComputeDriverKind>().unwrap(),
+            ComputeDriverKind::Local
         );
     }
 

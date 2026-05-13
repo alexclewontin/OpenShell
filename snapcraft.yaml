@@ -37,30 +37,19 @@ apps:
       - ssh-keys
       - system-observe
   gateway:
-    command: bin/openshell-gateway
+    command: bin/gateway-wrapper.sh
     daemon: simple
     refresh-mode: endure
     environment:
-      OPENSHELL_BIND_ADDRESS: 127.0.0.1
-      OPENSHELL_SERVER_PORT: 17670
-      OPENSHELL_DB_URL: "sqlite:$SNAP_COMMON/gateway.db?mode=rwc"
-      OPENSHELL_GRPC_ENDPOINT: http://host.openshell.internal:17670
-      OPENSHELL_DISABLE_TLS: "true"
-      OPENSHELL_DRIVERS: docker
-      OPENSHELL_DOCKER_SUPERVISOR_BIN: "$SNAP/bin/openshell-sandbox"
-      OPENSHELL_DOCKER_NETWORK_NAME: openshell-snap
-      OPENSHELL_SANDBOX_IMAGE: ghcr.io/nvidia/openshell-community/sandboxes/base:latest
-      OPENSHELL_SANDBOX_IMAGE_PULL_POLICY: IfNotPresent
-      OPENSHELL_SANDBOX_SSH_PORT: 2222
-      OPENSHELL_SSH_GATEWAY_HOST: 127.0.0.1
-      OPENSHELL_SSH_GATEWAY_PORT: 8080
       XDG_DATA_HOME: "$SNAP_COMMON"
       XDG_RUNTIME_DIR: "$SNAP_COMMON"
     plugs:
       - docker
+      - home
       - log-observe
       - network
       - network-bind
+      - network-control
       - ssh-keys
       - system-observe
 
@@ -86,17 +75,19 @@ parts:
     override-build: |
       set -euo pipefail
 
-      cargo build --release --locked -p openshell-cli --features bundled-z3
-      cargo build --release --locked -p openshell-server --bin openshell-gateway
-      cargo build --release --locked -p openshell-sandbox --bin openshell-sandbox
+      cargo build --release -p openshell-cli --features bundled-z3
+      cargo build --release -p openshell-server --bin openshell-gateway
+      cargo build --release -p openshell-sandbox --bin openshell-sandbox
 
-      install -D -m 0755 "$CRAFT_PROJECT_DIR/target/release/openshell" \
+      install -D -m 0755 target/release/openshell \
         "$CRAFT_PART_INSTALL/bin/openshell"
-      install -D -m 0755 "$CRAFT_PROJECT_DIR/target/release/openshell-gateway" \
+      install -D -m 0755 target/release/openshell-gateway \
         "$CRAFT_PART_INSTALL/bin/openshell-gateway"
-      install -D -m 0755 "$CRAFT_PROJECT_DIR/target/release/openshell-sandbox" \
+      install -D -m 0755 target/release/openshell-sandbox \
         "$CRAFT_PART_INSTALL/bin/openshell-sandbox"
       install -D -m 0644 "$CRAFT_PROJECT_DIR/LICENSE" \
         "$CRAFT_PART_INSTALL/usr/share/doc/openshell/LICENSE"
       install -D -m 0644 "$CRAFT_PROJECT_DIR/README.md" \
         "$CRAFT_PART_INSTALL/usr/share/doc/openshell/README.md"
+      install -D -m 0755 "$CRAFT_PROJECT_DIR/snap/gateway-wrapper.sh" \
+        "$CRAFT_PART_INSTALL/bin/gateway-wrapper.sh"

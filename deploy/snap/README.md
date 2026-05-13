@@ -88,18 +88,37 @@ The snap exposes the CLI:
 
 - `openshell`
 
-It also defines a system service running the gateway with the Docker driver.
+It also defines a system service running the gateway with a configurable compute driver.
 
 - `openshell.gateway`
 
-The gateway service uses `refresh-mode: endure` so snap refreshes do not restart
+The gateway uses `refresh-mode: endure` so snap refreshes do not restart
 it while sandboxes are active. Restart the service manually when you are ready
 to move the gateway to the refreshed snap revision.
 
-`openshell-sandbox` is staged next to `openshell-gateway` as the Docker
-supervisor binary. The gateway app passes it to the in-process Docker driver
-through `OPENSHELL_DOCKER_SUPERVISOR_BIN=$SNAP/bin/openshell-sandbox`. The
-service stores its gateway database under `$SNAP_COMMON`.
+## Configurable compute driver
+
+The gateway wrapper reads the `driver` snap config key to select the compute backend:
+
+```shell
+# Use the Docker driver (default)
+snap set openshell driver=docker
+
+# Use the native local driver (no Docker required)
+snap set openshell driver=local
+
+# Auto-detect: prefer Docker if available, fall back to local
+snap set openshell driver=auto
+```
+
+The wrapper script sets the appropriate `OPENSHELL_DRIVERS` and supervisor binary
+environment variables before launching `openshell-gateway`.
+
+`openshell-sandbox` is staged next to `openshell-gateway` and serves as the
+supervisor binary for both drivers. The gateway passes it through
+`OPENSHELL_DOCKER_SUPERVISOR_BIN` (Docker driver) or
+`OPENSHELL_LOCAL_SUPERVISOR_BIN` (local driver). The service stores its gateway
+database under `$SNAP_COMMON`.
 
 ## Interfaces
 
@@ -113,11 +132,46 @@ The `openshell` CLI app plugs:
 The `openshell.gateway` service plugs:
 
 - `docker`
+- `home`
 - `log-observe`
 - `network`
 - `network-bind`
+- `network-control`
 - `ssh-keys`
 - `system-observe`
+
+The `network-control` plug is needed for the local driver, which applies Landlock,
+seccomp, and network namespace isolation directly via Linux kernel syscalls.
+
+## Start a local (native) gateway from the snap
+
+Switch the driver to local and connect the required interfaces:
+
+```shell
+snap set openshell driver=local
+sudo snap connect openshell:network-control
+sudo snap connect openshell:system-observe
+```
+
+The local driver spawns `openshell-sandbox` as a direct child process — no
+container runtime, Docker snap, or overlayfs required. The sandbox supervisor
+applies Landlock, seccomp, and network namespace isolation directly via Linux
+kernel syscalls.
+
+## Start a local (native) gateway from the snap
+
+Switch the driver to local and connect the required interfaces:
+
+```shell
+snap set openshell driver=local
+sudo snap connect openshell:network-control
+sudo snap connect openshell:system-observe
+```
+
+The local driver spawns `openshell-sandbox` as a direct child process — no
+container runtime, Docker snap, or overlayfs required. The sandbox supervisor
+applies Landlock, seccomp, and network namespace isolation directly via Linux
+kernel syscalls.
 
 ## Start a Docker gateway from the snap
 

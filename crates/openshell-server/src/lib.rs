@@ -49,7 +49,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::watch;
 use tracing::{debug, error, info, warn};
 
-use compute::{ComputeRuntime, DockerComputeConfig, VmComputeConfig};
+use compute::{ComputeRuntime, DockerComputeConfig, LocalComputeConfig, VmComputeConfig};
 pub use grpc::OpenShellService;
 pub use http::{health_router, http_router, metrics_router, service_http_router};
 pub use multiplex::{MultiplexService, MultiplexedService};
@@ -152,6 +152,7 @@ pub async fn run_server(
     config: Config,
     vm_config: VmComputeConfig,
     docker_config: DockerComputeConfig,
+    local_config: LocalComputeConfig,
     tracing_log_bus: TracingLogBus,
 ) -> Result<()> {
     let database_url = config.database_url.trim();
@@ -160,7 +161,7 @@ pub async fn run_server(
     }
     let driver = configured_compute_driver(&config)?;
     if config.ssh_handshake_secret.is_empty()
-        && !matches!(driver, ComputeDriverKind::Docker | ComputeDriverKind::Vm)
+        && !matches!(driver, ComputeDriverKind::Docker | ComputeDriverKind::Vm | ComputeDriverKind::Ssh | ComputeDriverKind::Local)
     {
         return Err(Error::config(
             "ssh_handshake_secret is required. Set --ssh-handshake-secret or OPENSHELL_SSH_HANDSHAKE_SECRET",
@@ -194,6 +195,7 @@ pub async fn run_server(
         &config,
         &vm_config,
         &docker_config,
+        &local_config,
         store.clone(),
         sandbox_index.clone(),
         sandbox_watch_bus.clone(),
@@ -551,6 +553,7 @@ async fn build_compute_runtime(
     config: &Config,
     vm_config: &VmComputeConfig,
     docker_config: &DockerComputeConfig,
+    local_config: &LocalComputeConfig,
     store: Arc<Store>,
     sandbox_index: SandboxIndex,
     sandbox_watch_bus: SandboxWatchBus,
@@ -694,6 +697,23 @@ async fn build_compute_runtime(
             .await
             .map_err(|e| Error::execution(format!("failed to create compute runtime: {e}")))
         }
+        ComputeDriverKind::Ssh => {
+            return Err(Error::execution(
+                "SSH compute driver is not yet wired into the gateway; use a separate openshell-gateway instance with --drivers ssh"
+            ));
+        }
+        ComputeDriverKind::Local => {
+            ComputeRuntime::new_local(
+                local_config.clone(),
+                store,
+                sandbox_index,
+                sandbox_watch_bus,
+                tracing_log_bus,
+                supervisor_sessions,
+            )
+            .await
+            .map_err(|e| Error::execution(format!("failed to create compute runtime: {e}")))
+        }
     }
 }
 
@@ -702,14 +722,16 @@ fn configured_compute_driver(config: &Config) -> Result<ComputeDriverKind> {
         [] => openshell_core::config::detect_driver().ok_or_else(|| {
             Error::config(
                 "no compute driver configured and auto-detection found no suitable driver; \
-                set --drivers or OPENSHELL_DRIVERS to kubernetes, podman, docker, or vm",
+                set --drivers or OPENSHELL_DRIVERS to kubernetes, podman, docker, vm, ssh, or local",
             )
         }),
         [
             driver @ (ComputeDriverKind::Kubernetes
             | ComputeDriverKind::Vm
             | ComputeDriverKind::Docker
-            | ComputeDriverKind::Podman),
+            | ComputeDriverKind::Podman
+            | ComputeDriverKind::Ssh
+            | ComputeDriverKind::Local),
         ] => Ok(*driver),
         drivers => Err(Error::config(format!(
             "multiple compute drivers are not supported yet; configured drivers: {}",
@@ -805,7 +827,7 @@ mod tests {
             Err(e) => {
                 assert!(
                     e.to_string()
-                        .contains("no compute driver configured and none detected"),
+                        .contains("no compute driver configured and auto-detection found no suitable driver"),
                     "unexpected error: {e}"
                 );
             }
@@ -848,6 +870,15 @@ mod tests {
         assert_eq!(
             configured_compute_driver(&config).unwrap(),
             ComputeDriverKind::Docker
+        );
+    }
+
+    #[test]
+    fn configured_compute_driver_accepts_local() {
+        let config = Config::new(None).with_compute_drivers([ComputeDriverKind::Local]);
+        assert_eq!(
+            configured_compute_driver(&config).unwrap(),
+            ComputeDriverKind::Local
         );
     }
 

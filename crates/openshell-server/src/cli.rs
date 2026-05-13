@@ -16,7 +16,7 @@ use tracing::info;
 use tracing_subscriber::EnvFilter;
 
 use crate::certgen;
-use crate::compute::{DockerComputeConfig, VmComputeConfig};
+use crate::compute::{DockerComputeConfig, LocalComputeConfig, VmComputeConfig};
 use crate::{run_server, tracing_bus::TracingLogBus};
 
 /// `OpenShell` gateway process - gRPC and HTTP server with protocol multiplexing.
@@ -236,6 +236,36 @@ struct RunArgs {
         default_value = DEFAULT_DOCKER_NETWORK_NAME
     )]
     docker_network_name: String,
+
+    // ── SSH driver options ──────────────────────────────────────────────
+
+    /// SSH host for the SSH compute driver. Required when --drivers=ssh.
+    #[arg(long, env = "OPENSHELL_SSH_HOST")]
+    ssh_host: Option<String>,
+
+    /// SSH port on the remote host.
+    #[arg(long, env = "OPENSHELL_SSH_PORT", default_value_t = 22)]
+    ssh_port: u16,
+
+    /// SSH username for the remote host.
+    #[arg(long, env = "OPENSHELL_SSH_USER", default_value = "root")]
+    ssh_user: String,
+
+    /// Path to the SSH private key for authentication.
+    #[arg(long, env = "OPENSHELL_SSH_KEY")]
+    ssh_key: Option<PathBuf>,
+
+    /// Path to a local pre-built `openshell-sandbox` supervisor binary to
+    /// deploy to the remote host via SCP.
+    #[arg(long, env = "OPENSHELL_SSH_SUPERVISOR_BIN")]
+    ssh_supervisor_bin: Option<PathBuf>,
+
+    // ── Local (bare-metal) driver options ──────────────────────────────
+
+    /// Path to the `openshell-sandbox` supervisor binary for the local
+    /// bare-metal driver. Required when --drivers=local.
+    #[arg(long, env = "OPENSHELL_LOCAL_SUPERVISOR_BIN")]
+    local_supervisor_bin: Option<PathBuf>,
 
     /// Enable Kubernetes user namespace isolation (hostUsers: false) for
     /// sandbox pods.
@@ -473,6 +503,13 @@ async fn run_from_args(args: RunArgs) -> Result<()> {
         guest_tls_cert: args.docker_tls_cert,
         guest_tls_key: args.docker_tls_key,
         network_name: args.docker_network_name,
+};
+
+    let local_config = LocalComputeConfig {
+        supervisor_bin: args.local_supervisor_bin.unwrap_or_default(),
+        grpc_endpoint: config.grpc_endpoint.clone(),
+        ssh_socket_path: config.sandbox_ssh_socket_path.clone(),
+        log_level: config.log_level.clone(),
     };
 
     if args.disable_tls {
@@ -483,7 +520,7 @@ async fn run_from_args(args: RunArgs) -> Result<()> {
 
     info!(bind = %config.bind_address, "Starting OpenShell server");
 
-    run_server(config, vm_config, docker_config, tracing_log_bus)
+    run_server(config, vm_config, docker_config, local_config, tracing_log_bus)
         .await
         .into_diagnostic()
 }

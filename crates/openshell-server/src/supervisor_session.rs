@@ -68,6 +68,18 @@ impl openshell_driver_docker::SupervisorReadiness for SupervisorSessionRegistry 
     }
 }
 
+impl openshell_driver_ssh::SupervisorReadiness for SupervisorSessionRegistry {
+    fn is_supervisor_connected(&self, sandbox_id: &str) -> bool {
+        Self::is_connected(self, sandbox_id)
+    }
+}
+
+impl openshell_driver_local::SupervisorReadiness for SupervisorSessionRegistry {
+    fn is_supervisor_connected(&self, sandbox_id: &str) -> bool {
+        Self::is_connected(self, sandbox_id)
+    }
+}
+
 /// Registry of active supervisor sessions and pending relay channels.
 #[derive(Default)]
 pub struct SupervisorSessionRegistry {

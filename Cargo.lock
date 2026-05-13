@@ -3446,6 +3446,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "openshell-driver-local"
+version = "0.0.0"
+dependencies = [
+ "futures",
+ "openshell-core",
+ "tokio",
+ "tokio-stream",
+ "tonic",
+ "tracing",
+]
+
+[[package]]
 name = "openshell-driver-podman"
 version = "0.0.0"
 dependencies = [
@@ -3466,6 +3478,18 @@ dependencies = [
  "tonic",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "openshell-driver-ssh"
+version = "0.0.0"
+dependencies = [
+ "futures",
+ "openshell-core",
+ "tokio",
+ "tokio-stream",
+ "tonic",
+ "tracing",
 ]
 
 [[package]]
@@ -3642,7 +3666,9 @@ dependencies = [
  "openshell-core",
  "openshell-driver-docker",
  "openshell-driver-kubernetes",
+ "openshell-driver-local",
  "openshell-driver-podman",
+ "openshell-driver-ssh",
  "openshell-ocsf",
  "openshell-policy",
  "openshell-providers",

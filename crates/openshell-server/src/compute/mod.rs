@@ -6,6 +6,7 @@
 pub mod vm;
 
 pub use openshell_driver_docker::DockerComputeConfig;
+pub use openshell_driver_local::LocalComputeConfig;
 pub use vm::VmComputeConfig;
 
 use crate::grpc::policy::SANDBOX_SETTINGS_OBJECT_TYPE;
@@ -31,6 +32,7 @@ use openshell_driver_docker::DockerComputeDriver;
 use openshell_driver_kubernetes::{
     ComputeDriverService, KubernetesComputeConfig, KubernetesComputeDriver,
 };
+use openshell_driver_local::LocalComputeDriver;
 use openshell_driver_podman::{
     ComputeDriverService as PodmanDriverService, PodmanComputeConfig, PodmanComputeDriver,
 };
@@ -396,6 +398,34 @@ impl ComputeRuntime {
             tracing_log_bus,
             supervisor_sessions,
             true,
+            Vec::new(),
+        )
+        .await
+    }
+
+    pub async fn new_local(
+        config: LocalComputeConfig,
+        store: Arc<Store>,
+        sandbox_index: SandboxIndex,
+        sandbox_watch_bus: SandboxWatchBus,
+        tracing_log_bus: TracingLogBus,
+        supervisor_sessions: Arc<SupervisorSessionRegistry>,
+    ) -> Result<Self, ComputeError> {
+        let driver = LocalComputeDriver::new(config, supervisor_sessions.clone())
+            .await
+            .map_err(ComputeError::Message)?;
+        let driver: SharedComputeDriver = Arc::new(driver);
+        Self::from_driver(
+            driver,
+            None,
+            None,
+            None,
+            store,
+            sandbox_index,
+            sandbox_watch_bus,
+            tracing_log_bus,
+            supervisor_sessions,
+            false,
             Vec::new(),
         )
         .await
