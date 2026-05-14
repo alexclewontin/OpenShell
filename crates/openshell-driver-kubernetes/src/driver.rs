@@ -846,6 +846,33 @@ fn apply_supervisor_sideload(
             volume_mounts.push(supervisor_volume_mount());
         }
     }
+
+    // 3. Add the initContainer to inject the supervisor binary
+    let init_containers = spec
+        .entry("initContainers")
+        .or_insert_with(|| serde_json::json!([]))
+        .as_array_mut();
+
+    if let Some(init_containers) = init_containers {
+        let mut init_container = serde_json::json!({
+            "name": SUPERVISOR_INIT_CONTAINER_NAME,
+            "image": supervisor_image,
+            "command": ["cp", "/usr/local/bin/openshell-sandbox", format!("{}/openshell-sandbox", SUPERVISOR_MOUNT_PATH)],
+            "volumeMounts": [{
+                "name": SUPERVISOR_VOLUME_NAME,
+                "mountPath": SUPERVISOR_MOUNT_PATH,
+            }],
+        });
+        if !supervisor_image_pull_policy.is_empty()
+            && let Some(ic) = init_container.as_object_mut()
+        {
+            ic.insert(
+                "imagePullPolicy".to_string(),
+                serde_json::json!(supervisor_image_pull_policy),
+            );
+        }
+        init_containers.push(init_container);
+    }
 }
 
 /// Apply workspace persistence transforms to an already-built pod template.
