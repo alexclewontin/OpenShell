@@ -5,10 +5,14 @@ pub mod build;
 pub mod edge_token;
 pub mod oidc_token;
 
+pub mod apply;
+pub mod constants;
+pub mod k8s_init;
 mod metadata;
 pub mod mtls;
 pub mod paths;
 pub mod pki;
+pub mod reconcile;
 
 #[cfg(test)]
 use std::sync::Mutex;

@@ -46,6 +46,7 @@ spec:
             {{- toYaml .Values.securityContext | nindent 12 }}
           image: {{ include "openshell.image" . | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["openshell-gateway"]
           args:
             - --bind-address
             - "0.0.0.0"

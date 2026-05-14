@@ -488,6 +488,16 @@ enum Commands {
     },
 
     // ===================================================================
+    // CLUSTER COMMANDS
+    // ===================================================================
+    /// Manage the `OpenShell` cluster deployment.
+    #[command(help_template = SUBCOMMAND_HELP_TEMPLATE)]
+    Cluster {
+        #[command(subcommand)]
+        command: Option<ClusterCommands>,
+    },
+
+    // ===================================================================
     // GATEWAY COMMANDS
     // ===================================================================
     /// Manage gateway registrations.
@@ -644,6 +654,38 @@ fn normalize_completion_script(output: Vec<u8>, executable: &std::path::Path) ->
     let script = String::from_utf8(output)
         .map_err(|e| miette::miette!("generated completions were not valid UTF-8: {e}"))?;
     Ok(script.replace(executable.to_string_lossy().as_ref(), "openshell"))
+}
+
+#[derive(Subcommand, Debug)]
+enum ClusterCommands {
+    /// Initialize the `OpenShell` components in the current Kubernetes cluster.
+    #[command(help_template = LEAF_HELP_TEMPLATE, next_help_heading = "FLAGS")]
+    Init {
+        /// The namespace to deploy into.
+        #[arg(long, default_value = "openshell")]
+        namespace: String,
+
+        /// The destination registry for stashing rocks.
+        #[arg(long, required = true)]
+        registry: String,
+
+        /// Registry username for authenticating pushes.
+        #[arg(long)]
+        registry_username: Option<String>,
+
+        /// Registry token/password for authenticating pushes.
+        #[arg(long)]
+        registry_token: Option<String>,
+
+        /// Path to a registry authentication file (e.g. docker config.json).
+        #[arg(long)]
+        registry_authfile: Option<String>,
+
+        /// Path to the kubeconfig file, or '-' to read from stdin.
+        /// If omitted, uses the KUBECONFIG environment variable or ~/.kube/config.
+        #[arg(long)]
+        kubeconfig: Option<String>,
+    },
 }
 
 #[derive(Clone, Debug, ValueEnum)]
@@ -1769,6 +1811,99 @@ async fn main() -> Result<()> {
     }
 
     match cli.command {
+        // -----------------------------------------------------------
+        // Cluster commands
+        // -----------------------------------------------------------
+        Some(Commands::Cluster {
+            command: Some(command),
+        }) => match command {
+            ClusterCommands::Init {
+                namespace,
+                registry,
+                registry_username,
+                registry_token,
+                registry_authfile,
+                kubeconfig,
+            } => {
+                let Some(gateway_name) = cli.gateway else {
+                    return Err(miette::miette!(
+                        "ERROR: --gateway is required to name the new K8s gateway"
+                    ));
+                };
+
+                if cli.gateway_endpoint.is_some() {
+                    return Err(miette::miette!(
+                        "ERROR: --gateway-endpoint is not valid for k8s deployments; use --kubeconfig instead"
+                    ));
+                }
+
+                // Held for its Drop side-effect (deletes the temp file); never read.
+                #[allow(clippy::collection_is_never_read)]
+                let mut _temp_kubeconfig: Option<tempfile::NamedTempFile> = None;
+                if let Some(config_path) = kubeconfig {
+                    if config_path == "-" {
+                        let mut buf = Vec::new();
+                        std::io::Read::read_to_end(&mut std::io::stdin(), &mut buf).map_err(
+                            |e| miette::miette!("Failed to read kubeconfig from stdin: {}", e),
+                        )?;
+                        let mut temp = tempfile::NamedTempFile::new().map_err(|e| {
+                            miette::miette!("Failed to create temp kubeconfig: {}", e)
+                        })?;
+                        Write::write_all(&mut temp, &buf).map_err(|e| {
+                            miette::miette!("Failed to write kubeconfig temp file: {}", e)
+                        })?;
+                        let path = temp.path().to_path_buf();
+                        _temp_kubeconfig = Some(temp);
+                        #[allow(unsafe_code)]
+                        unsafe {
+                            std::env::set_var("KUBECONFIG", path);
+                        }
+                    } else {
+                        #[allow(unsafe_code)]
+                        unsafe {
+                            std::env::set_var("KUBECONFIG", config_path);
+                        }
+                    }
+                }
+
+                let effective_username = std::env::var("OPENSHELL_REGISTRY_USERNAME")
+                    .ok()
+                    .filter(|s| !s.is_empty())
+                    .or(registry_username);
+                let effective_password = std::env::var("OPENSHELL_REGISTRY_TOKEN")
+                    .ok()
+                    .filter(|s| !s.is_empty())
+                    .or_else(|| {
+                        std::env::var("OPENSHELL_REGISTRY_PASSWORD")
+                            .ok()
+                            .filter(|s| !s.is_empty())
+                    })
+                    .or(registry_token);
+                let effective_authfile = std::env::var("OPENSHELL_REGISTRY_AUTHFILE")
+                    .ok()
+                    .filter(|s| !s.is_empty())
+                    .or(registry_authfile);
+
+                openshell_bootstrap::k8s_init::init_external_cluster(
+                    &gateway_name,
+                    &namespace,
+                    &registry,
+                    effective_username.as_deref(),
+                    effective_password.as_deref(),
+                    effective_authfile.as_deref(),
+                )
+                .await?;
+                println!("Cluster initialized successfully.");
+            }
+        },
+        Some(Commands::Cluster { command: None }) => {
+            Cli::command()
+                .find_subcommand_mut("cluster")
+                .unwrap()
+                .print_help()
+                .map_err(|e| miette::miette!(e))?;
+        }
+
         // -----------------------------------------------------------
         // Gateway commands (was `cluster` / `cluster admin`)
         // -----------------------------------------------------------

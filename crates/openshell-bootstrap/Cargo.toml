@@ -22,6 +22,10 @@ tar = "0.4"
 tempfile = "3"
 tokio = { workspace = true }
 tracing = { workspace = true }
+kube = { workspace = true }
+k8s-openapi = { workspace = true }
+serde_yml = { workspace = true }
+dirs = { workspace = true }
 
 [dev-dependencies]
 

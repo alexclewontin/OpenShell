@@ -1,7 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::paths::{active_gateway_path, gateways_dir, last_sandbox_path};
+use crate::paths::{
+    active_gateway_path, gateways_dir, last_sandbox_path, system_active_gateway_path,
+    system_gateways_dir,
+};
 use miette::{IntoDiagnostic, Result, WrapErr};
 use openshell_core::paths::ensure_parent_dir_restricted;
 use serde::{Deserialize, Serialize};
@@ -149,7 +152,16 @@ pub fn store_gateway_metadata(name: &str, metadata: &GatewayMetadata) -> Result<
 }
 
 pub fn load_gateway_metadata(name: &str) -> Result<GatewayMetadata> {
-    let path = stored_metadata_path(name)?;
+    let primary = stored_metadata_path(name)?;
+    let path = if primary.exists() {
+        primary
+    } else if let Some(system) = system_gateways_dir().map(|d| d.join(name).join("metadata.json"))
+        && system.exists()
+    {
+        system
+    } else {
+        return Err(miette::miette!("no metadata found for gateway '{name}'"));
+    };
     let contents = std::fs::read_to_string(&path)
         .into_diagnostic()
         .wrap_err_with(|| format!("failed to read metadata from {}", path.display()))?;
@@ -175,12 +187,19 @@ pub fn save_active_gateway(name: &str) -> Result<()> {
 
 /// Load the active gateway name from persistent storage.
 ///
-/// Returns `None` if no active gateway has been set.
+/// Returns `None` if no active gateway has been set. Falls back to the
+/// system-level active gateway file when no per-user selection exists, so
+/// installer-provided defaults can take effect on a fresh system.
 pub fn load_active_gateway() -> Option<String> {
-    let path = active_gateway_path().ok()?;
-    let contents = std::fs::read_to_string(&path).ok()?;
-    let name = contents.trim().to_string();
-    if name.is_empty() { None } else { Some(name) }
+    let read = |path: PathBuf| {
+        let contents = std::fs::read_to_string(&path).ok()?;
+        let name = contents.trim().to_string();
+        (!name.is_empty()).then_some(name)
+    };
+    active_gateway_path()
+        .ok()
+        .and_then(read)
+        .or_else(|| system_active_gateway_path().and_then(read))
 }
 
 /// Save the last-used sandbox name for a gateway to persistent storage.
@@ -218,29 +237,39 @@ pub fn clear_last_sandbox_if_matches(gateway: &str, sandbox: &str) {
 
 /// List all gateways that have stored metadata.
 ///
-/// Scans `$XDG_CONFIG_HOME/openshell/gateways/` for subdirectories containing
-/// `metadata.json` and returns the parsed metadata for each.
+/// Scans `$XDG_CONFIG_HOME/openshell/gateways/` and, when set, the
+/// `OPENSHELL_SYSTEM_GATEWAY_DIR` directory. Per-user entries shadow
+/// system entries on name collision.
 pub fn list_gateways() -> Result<Vec<GatewayMetadata>> {
-    let dir = gateways_dir()?;
-    if !dir.exists() {
-        return Ok(Vec::new());
-    }
-
     let mut gateways = Vec::new();
-    let entries = std::fs::read_dir(&dir)
-        .into_diagnostic()
-        .wrap_err_with(|| format!("failed to read directory {}", dir.display()))?;
 
-    for entry in entries {
-        let entry = entry.into_diagnostic()?;
-        let path = entry.path();
-        // Only consider directories that contain a metadata.json file
-        if path.is_dir() {
-            let gateway_name = entry.file_name().to_string_lossy().to_string();
-            if let Ok(metadata) = load_gateway_metadata(&gateway_name) {
+    let mut scan = |dir: PathBuf| -> Result<()> {
+        if !dir.exists() {
+            return Ok(());
+        }
+        let entries = std::fs::read_dir(&dir)
+            .into_diagnostic()
+            .wrap_err_with(|| format!("failed to read directory {}", dir.display()))?;
+        for entry in entries {
+            let entry = entry.into_diagnostic()?;
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy().to_string();
+            if gateways.iter().any(|g: &GatewayMetadata| g.name == name) {
+                continue;
+            }
+            if let Ok(metadata) = load_gateway_metadata(&name) {
                 gateways.push(metadata);
             }
         }
+        Ok(())
+    };
+
+    scan(gateways_dir()?)?;
+    if let Some(system) = system_gateways_dir() {
+        scan(system)?;
     }
 
     // Sort by name for stable output

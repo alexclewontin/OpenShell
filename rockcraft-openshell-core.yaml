@@ -1,0 +1,59 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+name: openshell-core
+base: bare
+build-base: ubuntu@24.04
+adopt-info: workspace
+version: git
+summary: OpenShell Core
+description: OpenShell Gateway and Supervisor
+
+platforms:
+  amd64:
+  arm64:
+
+parts:
+  workspace:
+    plugin: rust
+    source: .
+    build-packages:
+      - build-essential
+      - pkg-config
+      - libssl-dev
+      - clang
+      - libclang-dev
+      - libz3-dev
+    stage-packages:
+      - base-files
+      - libc6
+      - libgcc-s1
+      - libssl3t64
+      - libz3-4
+      - ca-certificates
+      - busybox-static
+    rust-features: []
+    rust-path: 
+      - "crates/openshell-server"
+      - "crates/openshell-sandbox"
+    organize:
+      bin/openshell-gateway: usr/local/bin/openshell-gateway
+      bin/openshell-sandbox: usr/local/bin/openshell-sandbox
+    override-pull: |
+      craftctl default
+      # Set version to git describe or short commit hash
+      craftctl set version=$(git branch --show-current | tr '/' '-')-g$(git rev-parse --short HEAD)
+
+    override-build: |
+      craftctl default
+      mkdir -p $CRAFT_PART_INSTALL/bin
+      for cmd in sh cp sleep nsenter; do
+        ln -s busybox $CRAFT_PART_INSTALL/bin/$cmd
+      done
+
+
+  migrations:
+    plugin: dump
+    source: crates/openshell-server/migrations
+    organize:
+      '*': build/crates/openshell-server/migrations/
