@@ -1180,6 +1180,10 @@ fn sandbox_template_to_k8s(
         serde_json::json!({
             "capabilities": {
                 "add": capabilities
+            },
+            "appArmorProfile": {
+                "type": "Localhost",
+                "localhostProfile": "openshell-supervisor"
             }
         }),
     );
